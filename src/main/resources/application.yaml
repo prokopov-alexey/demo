@@ -1,0 +1,8 @@
+s3:
+  bucket: 
+  directory: dictionary
+  region: eu-west-3
+  accessKey: 
+  secretKey: 
+  serviceEndpoint: s3.eu-west-3.amazonaws.com
+  maxAge: 5

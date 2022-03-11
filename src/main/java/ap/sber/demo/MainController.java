@@ -2,25 +2,26 @@ package ap.sber.demo;
 
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.ObjectListing;
+import com.amazonaws.services.s3.model.ListObjectsV2Request;
+import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import java.io.ByteArrayInputStream;
-import java.nio.charset.Charset;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
-import java.util.Random;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class MainController {
+    
+    public final int BATCH_SIZE = 2;
     
     @Autowired
     private AmazonS3 client;
@@ -30,100 +31,94 @@ public class MainController {
 
     @Value("${s3.directory}")
     private String directory;
+
+    @Value("${s3.maxAge}")
+    private int maxAge;
     
     @GetMapping("/list")
-    public String main()
+    public S3ObjectListDto list(@RequestParam(defaultValue = "100", required = false) int maxKeys, @RequestParam(required = false) String startKey)
     {
-        ObjectListing objects = client.listObjects(bucket);
+        ListObjectsV2Result result = getList(startKey, maxKeys);
         
-        List<S3ObjectSummary> list = objects.getObjectSummaries();
-        
-        String response = "";
-        
-        while (true) {
-            response += showList(list);
-    
-            if (!objects.isTruncated()) {
-                break;
-            }
-            
-            objects = client.listNextBatchOfObjects(objects);
-        }
-        
-        return response;
+        return toDto(result);
     }
 
     @PostMapping("/clean")
-    public String clean()
+    public S3Result clean()
     {
-        ObjectListing objects = client.listObjects(bucket);
+        int count = 0;
         
-        List<S3ObjectSummary> list = objects.getObjectSummaries();
+        ListObjectsV2Result result = getList(null, BATCH_SIZE);
         
-        while (true) {
-            cleanList(list);
-    
-            if (!objects.isTruncated()) {
-                break;
-            }
-            
-            objects = client.listNextBatchOfObjects(objects);
+        count += cleanList(result.getObjectSummaries());
+        
+        while (result.isTruncated() && !result.getObjectSummaries().isEmpty()) {
+            String lastKey = result.getObjectSummaries().get(result.getObjectSummaries().size() - 1).getKey();
+            result = getList(lastKey, BATCH_SIZE);
+            count += cleanList(result.getObjectSummaries());
         }
         
-        return "Ok";
+        return new S3Result(true, "Deleted: " + count);
     }
     
-    private String showList(List<S3ObjectSummary> list) {
-        String response = "";
-        
+    private int cleanList(List<S3ObjectSummary> list) {
+        int count = 0;
         for(S3ObjectSummary summary: list) {
-            S3Object object = client.getObject(bucket, summary.getKey());
-            response += "Key=" + object.getKey();
-            if (object.getObjectMetadata() != null) {
-                response += "; ExpirationTime=" + object.getObjectMetadata().getExpirationTime();
-            }
-            
-            response += "\n";
-        }
-        
-        return response;
-    }
-
-    private void cleanList(List<S3ObjectSummary> list) {
-        for(S3ObjectSummary summary: list) {
-            S3Object object = client.getObject(bucket, summary.getKey());
-            if (!inFolder(object.getKey())) {
+            if (!inFolder(summary.getKey())) {
                 continue;
             }
             
-            if (object.getObjectMetadata() == null || object.getObjectMetadata().getExpirationTime() == null) {
-                continue;
-            }
-            
-            if (object.getObjectMetadata().getExpirationTime().compareTo(Date.from(Instant.now())) < 0 ) {
-                client.deleteObject(bucket, object.getKey());
+            if (summary.getLastModified().compareTo(Date.from(Instant.now().minus(maxAge, ChronoUnit.MINUTES))) < 0 ) {
+                client.deleteObject(bucket, summary.getKey());
+                count++;
             }
         }
+        
+        return count;
     }
 
     
     @PostMapping("/create")
-    public String save()
+    public S3Result create()
     {
         String id = getNewObjectName();
         
-        String data = "ABC";
+        String data = "1";
         ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setExpirationTime(Date.from(Instant.now().plus(5, ChronoUnit.MINUTES)));
-//        metadata.setExpirationTimeRuleId("deleteExpired");
+        metadata.setExpirationTime(Date.from(Instant.now().plus(maxAge, ChronoUnit.MINUTES)));
         
         try {
             client.putObject(bucket, wrapToFolder(id), new ByteArrayInputStream(data.getBytes()), metadata);
         } catch (AmazonServiceException e) {
-            return e.getErrorMessage();
+            return new S3Result(false, e.getErrorMessage());
         }
         
-        return "Ok";
+        return new S3Result(true, "Ok");
+    }
+    
+    public ListObjectsV2Result getList(String startKey, int maxKeys)
+    {
+        ListObjectsV2Request request = new ListObjectsV2Request();
+        
+        request.setBucketName(bucket);
+        request.setPrefix(directory + "/");
+        request.setMaxKeys(maxKeys);
+        if (startKey != null) {
+            request.setStartAfter(startKey);
+        }
+        
+        return client.listObjectsV2(request);
+    }
+    
+    private S3ObjectListDto toDto(ListObjectsV2Result result)
+    {
+        S3ObjectListDto list = new S3ObjectListDto(result.isTruncated());
+        
+        result.getObjectSummaries().forEach((S3ObjectSummary summary) -> {
+            list.getList().add(new S3ObjectDto(summary.getKey(), summary.getLastModified()));
+        });
+        
+        return list;
     }
     
     public String wrapToFolder(String id)
