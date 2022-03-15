@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
+
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,14 +21,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class MainController {
     
     public final int BATCH_SIZE = 2;
     
-    @Autowired
-    private AmazonS3 client;
+    private final AmazonS3 client;
     
-    @Value("${s3.bucket}")
+    @Value("${s3.bucketName}")
     private String bucket;
 
     @Value("${s3.directory}")

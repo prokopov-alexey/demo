@@ -17,7 +17,7 @@ public class S3Config {
 
     @Value("${s3.secretKey}")
     private String secretKey;
-    
+
     @Value("${s3.serviceEndpoint}")
     private String serviceEndpoint;
 
@@ -25,14 +25,13 @@ public class S3Config {
     private String region;
 
     @Bean
-    public AmazonS3 createAmazonS3()
-    {
+    public AmazonS3 createAmazonS3() {
         return AmazonS3ClientBuilder
-            .standard()
-            .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(serviceEndpoint, region))
-            .withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, secretKey)))
-            .withPathStyleAccessEnabled(false)
-            .build();
+                .standard()
+                .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(serviceEndpoint, region))
+                .withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, secretKey)))
+                .withPathStyleAccessEnabled(false)
+                .build();
     }
-    
+
 }
